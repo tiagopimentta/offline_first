@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadastro - PWA Form</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .btn-save {
+            background-color: #1a73e8;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .status-box {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .status-offline {
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            color: #856404;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .data-table th {
+            background-color: #f8f9fa;
+        }
+
+        .row-pending {
+            background-color: #fff3cd;
+        }
+
+        .row-synced {
+            background-color: #d4edda;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Cadastro</h1>
+
+        <form id="cadastroForm">
+            <div class="form-group">
+                <label for="nome">Nome</label>
+                <input type="text" id="nome" required>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" required>
+            </div>
+
+            <div class="form-group">
+                <label for="telefone">Telefone</label>
+                <input type="tel" id="telefone" required>
+            </div>
+
+            <button type="submit" class="btn-save">Salvar</button>
+        </form>
+
+        <div id="statusConexao" class="status-box">
+            Status da Conexão
+        </div>
+
+        <div>
+            <h2>Dados Pendentes</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Telefone</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="dadosPendentes">
+                    <!-- Dados serão inseridos aqui via JavaScript -->
+                </tbody>
+            </table>
+            <button id="syncButton" class="btn-save">Sincronizar Dados</button>
+        </div>
+
+    </div>
+
+    <script>
+        // Configuração do IndexedDB
+        const dbName = 'FormPWADB';
+        const dbVersion = 1;
+        let db;
+
+        // Inicialização do banco de dados
+        const request = indexedDB.open(dbName, dbVersion);
+
+        request.onerror = function (event) {
+            console.error("Erro ao abrir o banco de dados:", event.target.error);
+        };
+
+        request.onupgradeneeded = function (event) {
+            db = event.target.result;
+            if (!db.objectStoreNames.contains('formData')) {
+                const objectStore = db.createObjectStore('formData', { keyPath: 'id', autoIncrement: true });
+                objectStore.createIndex('email', 'email', { unique: false });
+                objectStore.createIndex('status', 'status', { unique: false });
+            }
+        };
+
+        request.onsuccess = function (event) {
+            db = event.target.result;
+            atualizarTabelaDados();
+        };
+
+        // Função para salvar dados
+        function salvarDados(dados) {
+            const transaction = db.transaction(['formData'], 'readwrite');
+            const objectStore = transaction.objectStore('formData');
+
+            const record = {
+                ...dados,
+                synced: false, // Sempre começa como não sincronizado
+                timestamp: new Date().getTime()
+            };
+
+            const addRequest = objectStore.add(record);
+
+            addRequest.onsuccess = function () {
+                atualizarTabelaDados();
+            };
+        }
+
+        // Função para atualizar a tabela de dados
+        function atualizarTabelaDados() {
+            const transaction = db.transaction(['formData'], 'readonly');
+            const objectStore = transaction.objectStore('formData');
+            const getRequest = objectStore.getAll();
+
+            getRequest.onsuccess = function () {
+                const dados = getRequest.result;
+                const tbody = document.getElementById('dadosPendentes');
+                tbody.innerHTML = '';
+
+                dados.forEach(item => {
+                    const tr = document.createElement('tr');
+                    tr.className = item.synced ? 'row-synced' : 'row-pending';
+
+                    tr.innerHTML = `
+                        <td>${item.email}</td>
+                        <td>${item.telefone}</td>
+                        <td>${item.synced ? 'Sincronizado' : 'Pendente'}</td>
+                    `;
+
+                    tbody.appendChild(tr);
+                });
+            };
+        }
+
+        // Função para sincronizar dados manualmente
+        function sincronizarDadosManual() {
+            const transaction = db.transaction(['formData'], 'readwrite');
+            const objectStore = transaction.objectStore('formData');
+            const getRequest = objectStore.getAll();
+
+            getRequest.onsuccess = function () {
+                const dados = getRequest.result;
+                dados.forEach(item => {
+                    if (!item.synced) {
+                        console.log('Enviando dados manualmente:', item);
+
+                        // Marca como sincronizado no IndexedDB
+                        const updateTransaction = db.transaction(['formData'], 'readwrite');
+                        const updateStore = updateTransaction.objectStore('formData');
+                        item.synced = true;
+                        updateStore.put(item);
+                    }
+                });
+                atualizarTabelaDados();
+            };
+        }
+
+        // Atualizar status de conexão
+        function atualizarStatusConexao() {
+            const statusElement = document.getElementById('statusConexao');
+            if (navigator.onLine) {
+                statusElement.textContent = 'Online - Você pode sincronizar manualmente';
+                statusElement.className = 'status-box';
+            } else {
+                statusElement.textContent = 'Offline - Dados serão salvos localmente';
+                statusElement.className = 'status-box status-offline';
+            }
+        }
+
+        // Event Listeners
+        window.addEventListener('online', atualizarStatusConexao);
+        window.addEventListener('offline', atualizarStatusConexao);
+
+        document.getElementById('cadastroForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const dados = {
+                nome: document.getElementById('nome').value,
+                email: document.getElementById('email').value,
+                telefone: document.getElementById('telefone').value
+            };
+
+            salvarDados(dados);
+            this.reset();
+        });
+
+        document.getElementById('syncButton').addEventListener('click', function () {
+            sincronizarDadosManual();
+        });
+
+        // Inicializar status de conexão
+        atualizarStatusConexao();
+
+        // Registrar Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js')
+                .then(function (registration) {
+                    console.log('ServiceWorker registrado com sucesso:', registration);
+                })
+                .catch(function (error) {
+                    console.log('Falha ao registrar ServiceWorker:', error);
+                });
+        }
+    </script>
+</body>
+
+</html>
